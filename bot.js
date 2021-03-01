@@ -23,15 +23,15 @@ class Bot {
             }
         });
         /*
-            js implicity type conversion rant.
-            So here i was thinking i made some big mistake.
-            The ids would allways be wrong by a couple of digits.
+            js implicit type conversion rant.
+            So here I was thinking I made some big mistake.
+            The ids would always be wrong by a couple of digits.
             But why you might ask is this not just some stupid mistake you made?
-            But the answer is sadly no, javascript in all it's winsdom saw that my string
+            But the answer is sadly no, javascript in all its wisdom saw that my string
             consisted of only numbers and said this is not a string no more this is a number.
-            Thats when it all started going down hill because javascript in all it's winsdom
-            forgot how to convert a string to a number and made a mistake in last digits every time.
-            So i was forced to add a modifier to the text to help javascript under stand that this was no number.
+            That's when it all started going downhill because javascript in all its wisdom
+            forgot how to convert a string to a number and made a mistake in the last digits every time.
+            So I was forced to add a modifier to the text to help javascript understand that this was no number.
         */
         this.id_modifier = "id";
         /*
