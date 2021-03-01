@@ -1,0 +1,15 @@
+{
+    "twitter":{
+        "consumer_key": "",
+        "consumer_secret": "",
+        "bearer_token": ""
+    },
+    "reddit":{
+        "username": "",
+        "password": "",
+        "appId": "",
+        "appSecret": "",
+        "useragent": ""
+    },
+    "discord": ""
+}
