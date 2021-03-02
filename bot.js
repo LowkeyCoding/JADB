@@ -4,6 +4,9 @@ const Reddit = require('reddit');
 const Twitter = require('twitter');
 const fs = require('fs');
 
+
+const require_admin = 2, require_moderator = 1, require_all = 0
+
 class Bot {
     constructor(db, discord, reddit, twitter) {
         this.guild_settings = new Map();
@@ -22,51 +25,12 @@ class Bot {
                 this.setup_commands();
             }
         });
-        /*
-            js implicit type conversion rant.
-            So here I was thinking I made some big mistake.
-            The ids would always be wrong by a couple of digits.
-            But why you might ask is this not just some stupid mistake you made?
-            But the answer is sadly no, javascript in all its wisdom saw that my string
-            consisted of only numbers and said this is not a string no more this is a number.
-            That's when it all started going downhill because javascript in all its wisdom
-            forgot how to convert a string to a number and made a mistake in the last digits every time.
-            So I was forced to add a modifier to the text to help javascript understand that this was no number.
-        */
         this.id_modifier = "id";
-        /*
-            Get all the guild settings in an array so we don't have to query the database
-            every time we want to get the prefix and so on.
-            STRUCTURE
-            {GUILD_ID: {
-                admin: '',
-                moderators: ['id',...],
-                prefix: '',
-                sepereator: '',
-                room_id: '',
-                update_interval: ''.
-                follow_reddit: [{
-                    username: '',
-                    last_post: '',
-                    alias: '',
-                    message: ''
-                },...],
-                follow_twitter: [{
-                    username: '',
-                    last_post: '',
-                    alias: '',
-                    message: ''
-                },...]
-                
-            },...}
-        */
     }
-    // Setup handlers
-    /*
-    Database structure
+    /* Database structure
     - guild_settings (Uses the guild id as TL key)
         - admin STRING (The id of the bot admin)
-        - moderators STRING (A json string of user that get admin like privilegdes)
+        - moderators STRING (A json string of user that get admin like privilegedes)
             - moderator_id STRING (The id of the moderator)
         - prefix STRING (The prefix for commands)
         - seperator STRING (The separator between command arguments)
@@ -83,6 +47,7 @@ class Bot {
              - message STRING (Custom message for when a new post is posted)
              - last_tweet STRING (The path to the last tweet)
     */
+    
     setup_database() {
         this.db.serialize(()=>{
             this.info("Setting up the database");
@@ -105,7 +70,7 @@ class Bot {
     setup_bots(){
         this.get_all_guild_settings((guild)=>{
             this.guild_settings.set(guild["GUILD_ID"], {
-                "admin": guild["ADMIN"],
+                "admin": guild["ADMIN"].substr(2),
                 "moderators": JSON.parse(guild["MODERATORS"]),
                 "prefix": guild["PREFIX"],
                 "seperator": guild["SEPERATOR"],
@@ -120,28 +85,22 @@ class Bot {
     }
 
     setup_commands(){
-        this.on_command("handover_admin", msg => {
-            let args = this.get_command_args(msg);
-            let guild_id = this.get_guild_from_message(msg)
-            if(args instanceof Array){
-                msg.reply(`This command only requires 1 argument you supplied the arguments: ${args}`);
-            } else {
-                let admin_id = args;
-                if(admin_id === this.guild_settings.get(guild_id).admin){
+        this.on_command("handover_admin", require_admin, msg => {
+            let args = this.get_command_args(msg, 1);
+            let guild_id = this.get_guild(msg)
+            if(args !== null){
+                if(this.is_admin(msg)){
                     this.update_guild_setting(guild_id, "admin", admin_id);
                 }
             }
         });
 
-        this.on_command("add_moderator", msg => {
-            let args = this.get_command_args(msg);
-            let guild_id = this.get_guild_from_message(msg)
-            if(args instanceof Array){
-                msg.reply(`This command only requires 1 argument you supplied the arguments: ${args}`);
-            } else {
+        this.on_command("add_moderator", require_admin, msg => {
+            let args = this.get_command_args(msg, 1);
+            let guild_id = this.get_guild(msg)
+            if(args !== null){
                 let moderator = args;
-                let admin_id = this.get_admin(guild_id);
-                if(admin_id === this.guild_settings.get(guild_id).admin){
+                if(this.is_admin(msg)){
                     let mods = this.guild_settings.get(guild_id).moderators;
                     mods.push(moderator);
                     this.update_guild_setting(guild_id, "moderators", mods);
@@ -149,16 +108,12 @@ class Bot {
             }
         });
 
-        this.on_command("join_room", msg => {
-            let args = this.get_command_args(msg);
-            let guild_id = this.get_guild_from_message(msg);
-            if(args instanceof Array){
-                msg.reply(`This command only requires 1 argument you supplied the arguments: ${args}`);
-            } else {
+        this.on_command("join_room", require_admin, msg => {
+            let args = this.get_command_args(msg, 1);
+            let guild_id = this.get_guild(msg);
+            if(args !== null){
                 let room_id = this.id_modifier+args;
-                // add so mods can do it too
-                let admin_id = this.get_admin(guild_id);
-                if(admin_id === this.guild_settings.get(guild_id).admin){
+                if(this.is_admin(msg) || this.is_moderator(msg)){
                     this.update_guild_setting(guild_id, "room_id", room_id, ()=>{
                         this.send_message_to_channel(room_id.substring(2),`This is now the place for twitter and reddit updates!`);
                     });
@@ -166,16 +121,12 @@ class Bot {
             }
         });
 
-        this.on_command("set_update_interval", msg => {
-            let args = this.get_command_args(msg);
-            let guild_id = this.get_guild_from_message(msg);
-            if(args instanceof Array){
-                msg.reply(`This command only requires 1 argument you supplied the arguments: ${args}`);
-            } else {
+        this.on_command("set_update_interval", require_admin, msg => {
+            let args = this.get_command_args(msg, 1);
+            let guild_id = this.get_guild(msg);
+            if(args !== null){
                 let update_interval = args;
-                // [TODO] ARE YOU FUCKING DRUNK CHECKING THE STORED ID VS THE STORED ID!!!
-                let admin_id = this.get_admin(guild_id);
-                if(admin_id === this.guild_settings.get(guild_id).admin){
+                if(this.is_admin(msg)){
                     this.update_guild_setting(guild_id, "update_interval", update_interval, ()=>{
                         msg.reply(`The update interval is now ${update_interval}`);
                     });
@@ -183,90 +134,91 @@ class Bot {
             }
         });
 
-        this.on_command("follow_reddit_account", msg => {
-            let args = this.get_command_args(msg);
-            let guild_id = this.get_guild_from_message(msg);
-            if(args instanceof Array && args.length === 3){
+        this.on_command("follow_reddit_account", require_moderator, msg => {
+            let args = this.get_command_args(msg, 3);
+            let guild_id = this.get_guild(msg);
+            if(args !== null){
                 let follow_object = `{"username":"${args[0]}","alias":"${args[1]}","message":"${args[2]}","last_post":""}`;
-                let admin_id = this.get_admin(guild_id);
-                if(admin_id === this.guild_settings.get(guild_id).admin){
-                    if (this.guild_settings.get(guild_id).follow_reddit == null){
-                        this.update_guild_setting(guild_id, "follow_reddit", "["+follow_object+ "]", (guild_id)=>{
-                            this.refresh_guild_settings(guild_id);
-                        });
-                    } else {
-                        let follow_reddit = this.guild_settings.get(guild_id).follow_reddit;
-                        for(let user of follow_reddit){
-                            if(args[0] === user.username){
-                                msg.reply(`This server is allready following "${args[0]}"`);
-                                return;
-                            } 
-                        }
-                        msg.reply(`This server is now following "${args[0]}"`);
-                        this.guild_settings.get(guild_id).follow_reddit.push(JSON.parse(follow_object));
-                        this.update_guild_setting(guild_id, "follow_reddit", JSON.stringify(follow_reddit));
-                    }
-                }
-            } else {
-                msg.reply(`This command requires 3 argument you supplied the arguments: ${args}`);
-            }
-        });
-
-        this.on_command("unfollow_reddit_account", msg => {
-            let args = this.get_command_args(msg);
-            let guild_id = this.get_guild_from_message(msg);
-            if(args instanceof String){
-                let admin_id = this.get_admin(guild_id);
-                if(admin_id === this.guild_settings.get(guild_id).admin){
+                if (this.guild_settings.get(guild_id).follow_reddit == null){
+                    this.update_guild_setting(guild_id, "follow_reddit", "["+follow_object+ "]", (guild_id)=>{
+                        this.refresh_guild_settings(guild_id);
+                    });
+                } else {
                     let follow_reddit = this.guild_settings.get(guild_id).follow_reddit;
-                        for(let user of follow_reddit){
-                            if(args[0] === user.username){
-                                //[TODO] Remove from data base and local settings
-                                return;
-                            } 
-                        }
+                    for(let user of follow_reddit){
+                        if(args[0] === user.username){
+                            msg.reply(`This server is already following "${args[0]}"`);
+                            return;
+                        } 
+                    }
+                    msg.reply(`This server is now following "${args[0]}"`);
+                    this.guild_settings.get(guild_id).follow_reddit.push(JSON.parse(follow_object));
+                    this.update_guild_setting(guild_id, "follow_reddit", JSON.stringify(follow_reddit));
                 }
             }
         });
 
-        this.on_command("follow_twitter_account", msg => {
-            let args = this.get_command_args(msg);
-            let guild_id = this.get_guild_from_message(msg);
-            if(args instanceof Array && args.length === 3){
-                let follow_object = `{"username":"${args[0]}","alias":"${args[1]}","message":"${args[2]}","last_tweet":""}`;
-                let admin_id = this.get_admin(guild_id);
-                if(admin_id === this.guild_settings.get(guild_id).admin){
-                    if (this.guild_settings.get(guild_id).follow_twitter == null){
-                        this.update_guild_setting(guild_id, "follow_twitter", "["+follow_object+ "]", (guild_id)=>{
-                            this.refresh_guild_settings(guild_id);
+        this.on_command("unfollow_reddit_account", require_moderator, msg => {
+            let args = this.get_command_args(msg, 1);
+            let guild_id = this.get_guild(msg);
+            if(args !== null){
+                let follow_reddit = this.guild_settings.get(guild_id).follow_reddit;
+                for(let user in follow_reddit){
+                    if(args[0] === follow_reddit[user].username){
+                        follow_reddit.splic(user, 1);
+                        this.update_guild_setting(guild_id, "follow_reddit", JSON.stringify(follow_reddit), (guild_id) => {
+                            this.guild_settings.get(guild_id).follow_reddit = follow_reddit;
                         });
-                    } else {
-                        let follow_twitter = this.guild_settings.get(guild_id).follow_twitter;
-                        for(let user of follow_twitter){
-                            if(args[0] === user.username){
-                                msg.reply(`This server is allready following "${args[0]}"`);
-                                return;
-                            } 
-                        }
-                        msg.reply(`This server is now following "${args[0]}"`);
-                        this.guild_settings.get(guild_id).follow_twitter.push(JSON.parse(follow_object));
-                        this.update_guild_setting(guild_id, "follow_twitter", JSON.stringify(follow_twitter));
+                        return;
                     }
                 }
-            } else {
-                msg.reply(`This command requires 3 argument you supplied the arguments: ${args}`);
             }
         });
 
-        this.on_command("unfollow_twitter_account", msg => {
-            // [TODO] create a function
+        this.on_command("follow_twitter_account", require_moderator, msg => {
+            let args = this.get_command_args(msg, 3);
+            let guild_id = this.get_guild(msg);
+            if(args !== null){
+                let follow_object = `{"username":"${args[0]}","alias":"${args[1]}","message":"${args[2]}","last_tweet":""}`;
+                if (this.guild_settings.get(guild_id).follow_twitter == null){
+                    this.update_guild_setting(guild_id, "follow_twitter", "["+follow_object+ "]", (guild_id)=>{
+                        this.refresh_guild_settings(guild_id);
+                    });
+                } else {
+                    let follow_twitter = this.guild_settings.get(guild_id).follow_twitter;
+                    for(let user of follow_twitter){
+                        if(args[0] === user.username){
+                            msg.reply(`This server is already following "${args[0]}"`);
+                            return;
+                        } 
+                    }
+                    msg.reply(`This server is now following "${args[0]}"`);
+                    this.guild_settings.get(guild_id).follow_twitter.push(JSON.parse(follow_object));
+                    this.update_guild_setting(guild_id, "follow_twitter", JSON.stringify(follow_twitter));
+                }
+            }
         });
 
-        this.on_command("get_settings", msg => {
-            this.get_guild_settings(this.get_guild_from_message(msg), (guild_id, settings) => {
-                console.log(settings);
-                msg.reply(JSON.stringify(settings));
-            })
+        this.on_command("unfollow_twitter_account", require_moderator, msg => {
+            let args = this.get_command_args(msg, 1);
+            let guild_id = this.get_guild(msg);
+            if(args !== null){
+                let follow_twitter = this.guild_settings.get(guild_id).follow_twitter;
+                for(let user in follow_twitter){
+                    if(args === follow_twitter[user].username){
+                        follow_twitter.splice(user, 1);
+                        this.update_guild_setting(guild_id, "follow_twitter", JSON.stringify(follow_twitter), (guild_id) => {
+                            this.guild_settings.get(guild_id).follow_twitter = follow_twitter;
+                        });
+                        return;
+                    }
+                }
+                msg.reply(`This server was not following "${args}"!`);
+            }
+        });
+
+        this.on_command("ping", require_all, msg => {
+            msg.reply("pong");
         });
     }
 
@@ -277,17 +229,14 @@ class Bot {
         
         this.client.on('message', msg => {
             let guild_id = this.id_modifier + msg.channel.guild.id.toString();
-            if (msg.content === 'ping') {
-                msg.reply('Pong!');
-            }
             if(this.guild_settings.has(guild_id) && this.guild_settings.get(guild_id) !== undefined) {
                 let prefix = this.guild_settings.get(guild_id).prefix;
                 if(msg.content[0] === prefix){
                     this.execute_command(msg);
                 }
             } else if(msg.content === '!add_server'){
-                let guild_id = this.get_guild_from_message(msg).substr(2);
-                let admin_id = this.get_admin_from_message(msg).substr(2);
+                let guild_id = this.get_guild(msg).substr(2);
+                let admin_id = msg.channel.guild.ownerID;
                 this.add_server(guild_id, admin_id, "!", " ");
                 msg.reply(`Sever was successfully added to the bots database! The admin is ${admin_id}`);
             }
@@ -308,7 +257,6 @@ class Bot {
 
         this.client.login(discord_client_string);
     }
-    
 
 
     // Database operations
@@ -482,6 +430,7 @@ class Bot {
                 message = message = message.split('_').join(' ');
                 message = message.replace('$alias', account.alias);
                 message = message.replace('$post', `${"https://reddit.com/"+latest_post}`);
+                
                 let room_id = this.guild_settings.get(guild_id).room_id;
                 this.send_message_to_channel(room_id, message);
                 this.info(`New post from ${account.alias} why the fuck are you here!`);
@@ -525,31 +474,41 @@ class Bot {
         }
     }
 
-    // Command handlers
-    on_command(command, handler) {
+    /* Command handlers
+        0: all
+        1: mods and admin
+        2: admin
+    */
+    on_command(command, privilege_level, handler) {
         if(!this.commands.has(command)){
-            this.commands.set(command, handler);
+            this.commands.set(command, {"level": privilege_level, "handler": handler});
             if(this.commands.has(command)){
                 this.info(`Registered the command: ${command}`);
             }
-        }
+        } else this.error(`Command already registered: ${command}`);
     }
 
-    get_command_args(msg) {
-        let guild_id = this.get_guild_from_message(msg);
-        let args = msg.content.split(this.guild_settings.get(guild_id).seperator)
-        let arglen = args.length;
-        if(arglen > 2){
-            // We start from the second element in the list since the first is the command.
+    get_command_args(msg, argument_count) {
+        let guild_id = this.get_guild(msg);
+        let args = msg.content.split(this.guild_settings.get(guild_id).seperator);
+
+        if(args.length === argument_count+1 && args instanceof Array){
+            if(args.length > 2){
+                // We start from the second element in the list since the first is the command.
+                args.shift();
+                return args;
+            }
+            //In the case that we only got a single argument.
+            return args[1];
+        } else {
             args.shift();
-            return args;
+            msg.reply(`This command requires ${argument_count} argument you supplied the arguments: [${args}]`);
+            return null;
         }
-        //In the case that we only got a single argument.
-        return  args[1]; 
     }
 
     get_command(msg) {
-        let guild_id = this.get_guild_from_message(msg);
+        let guild_id = this.get_guild(msg);
         let args = msg.content.split(this.guild_settings.get(guild_id).seperator);
         return args[0].substring(1);
     }
@@ -557,40 +516,65 @@ class Bot {
     get_admin(guild_id) {
         return this.guild_settings.get(guild_id).admin;
     }
-
-    get_guild_from_message(msg) {
-        return this.id_modifier + msg.channel.guild.id;
-    }
     
-    get_admin_from_message(msg) {
-        return this.id_modifier + msg.channel.guild.ownerID;
-    }
-
     execute_command(msg){
-        let command = this.get_command(msg);
-        if (this.commands.has(command)){
-            // expand the list so instead of func([foo, barr]) we get func(foo, bar)
-            this.commands.get(command)(msg);
+        let command_name = this.get_command(msg);
+        if (this.commands.has(command_name)){
+            let command = this.commands.get(command_name);
+            if(command.level === require_all){
+                command.handler(msg);
+            } else if(command.level === require_moderator){
+                if(this.is_admin(msg) || this.is_moderator(msg)){
+                    command.handler(msg);
+                } else {
+                    msg.reply(`You need to be an administrator or moderator to execute ${command}!`)
+                }
+            } else if(command.level === require_admin){
+                if(this.is_admin(msg)){
+                    command.handler(msg);
+                } else {
+                    msg.reply(`You need to be an administrator to execute ${command_name}!`)
+                }
+            } else {
+                msg.reply(`This command requires a unkown privilege level ${command.level}!`);
+            }
         } else {
-            let error = `The command ${command} is not registered.`;
+            let error = `The command ${command_name} is not registered.`;
             msg.reply(error);
             this.error(error);
         }
     }
 
     // Helper functions
-    is_moderator(guild_id, moderator){
-        for(mod of this.guild_settings.get(guild_id).moderators){
-            if(mod === moderator){
+    is_moderator(msg){
+        for(moderator of this.guild_settings.get(this.get_guild(msg)).moderators){
+            if(moderator === this.get_sender(msg)){
                 return true;
             }
         }
         return false;
     }
 
+    is_admin(msg){
+        let sender = this.get_sender(msg);
+        let admin = this.guild_settings.get(this.get_guild(msg)).admin;
+        if(admin === sender){
+            return true;
+        } else return false;
+    }
+
+    get_sender(msg){
+        return msg.author.id;
+    }
+
+    get_guild(msg) {
+        return this.id_modifier + msg.channel.guild.id;
+    }
+
     error(err) {
         console.log("[error]",err);
     }
+
     info(msg) {
         console.log("[info]", msg);
     }
