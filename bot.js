@@ -1,19 +1,18 @@
 const sqlite3 = require('sqlite3').verbose();
 const Discord = require('discord.js');
-const Reddit = require('reddit');
-const Twitter = require('twitter');
-const fs = require('fs');
 
 
 const require_admin = 2, require_moderator = 1, require_all = 0
 
 class Bot {
-    constructor(db, discord, reddit, twitter) {
+    constructor(db, discord) {
         this.guild_settings = new Map();
         this.commands = new Map();
+
+        this.follow_clients = new Map();
+        this.get_latest_post = new Map();
+
         this.client = new Discord.Client();
-        this.reddit = new Reddit(reddit);
-        this.twitter = new Twitter(twitter);
         this.db = new sqlite3.Database(db, sqlite3.OPEN_READWRITE, (err)=> {
             if(err) {
                 this.error(err);
@@ -22,12 +21,12 @@ class Bot {
                 this.setup_database();
                 this.setup_bots();
                 this.setup_discord_client(discord);
-                this.setup_commands();
             }
         });
         this.id_modifier = "id";
     }
     /* Database structure
+    GUILD TABLE
     - guild_settings (Uses the guild id as TL key)
         - admin STRING (The id of the bot admin)
         - moderators STRING (A json string of user that get admin like privilegedes)
@@ -36,16 +35,15 @@ class Bot {
         - seperator STRING (The separator between command arguments)
         - room_id STRING (Room the bot is connected to when printing data)
         - update_interval INTEGER (The interval for updating twitter and reddit posts in ms)
-        - follow_reddit OBJECT (A json string of all users to follow on reddit)
-            - username STRING (the username)
-            - alias STRING (The users alias)
-            - message STRING (Custom message for when a new post is posted)
-            - last_post path STRING (The path to the last post)
-        - follow_twitter OBJECT (A json string of all users to follow on twitter)
-             - username STRING (the username)    
-             - alias STRING (The users alias)
-             - message STRING (Custom message for when a new post is posted)
-             - last_tweet STRING (The path to the last tweet)
+        - following STRING (A json string of all the users the server is following)
+            - client STRING (The client used to get the latest post)
+            - username STRING (The username of the user)
+            - alias STRING (The alias of the user)
+            - last_post STRING (the last post of the user)
+    
+    FOLLOW TABLE
+    - GUILD_ID STRING (Uses the guild id as TL key)
+        -FOLLOWING STRING (A json string of all users followed by a guild)
     */
     
     setup_database() {
@@ -60,8 +58,7 @@ class Bot {
                     SEPERATOR STRING NOT NULL,
                     ROOM_ID STRING,
                     UPDATE_INTERVAL INTEGER,
-                    FOLLOW_REDDIT STRING,
-                    FOLLOW_TWITTER STRING
+                    FOLLOWING STRING
                 );
             `);
         });
@@ -76,149 +73,10 @@ class Bot {
                 "seperator": guild["SEPERATOR"],
                 "room_id": guild["ROOM_ID"] === null ? guild["ROOM_ID"] : guild["ROOM_ID"].substr(2),
                 "update_interval": guild["UPDATE_INTERVAL"],
-                "follow_reddit": JSON.parse(guild["FOLLOW_REDDIT"]),
-                "follow_twitter": JSON.parse(guild["FOLLOW_TWITTER"])
+                "following": JSON.parse(guild["FOLLOWING"]),
             });
-            this.loop_getters(guild["GUILD_ID"]);
+            this.loop_getters(guild["GUILD_ID"], 6000);
             this.info(`Launched bot for ${guild["GUILD_ID"]}`);
-        });
-    }
-
-    setup_commands(){
-        this.on_command("handover_admin", require_admin, msg => {
-            let args = this.get_command_args(msg, 1);
-            let guild_id = this.get_guild(msg)
-            if(args !== null){
-                if(this.is_admin(msg)){
-                    this.update_guild_setting(guild_id, "admin", admin_id);
-                }
-            }
-        });
-
-        this.on_command("add_moderator", require_admin, msg => {
-            let args = this.get_command_args(msg, 1);
-            let guild_id = this.get_guild(msg)
-            if(args !== null){
-                let moderator = args;
-                if(this.is_admin(msg)){
-                    let mods = this.guild_settings.get(guild_id).moderators;
-                    mods.push(moderator);
-                    this.update_guild_setting(guild_id, "moderators", mods);
-                }
-            }
-        });
-
-        this.on_command("join_room", require_admin, msg => {
-            let args = this.get_command_args(msg, 1);
-            let guild_id = this.get_guild(msg);
-            if(args !== null){
-                let room_id = this.id_modifier+args;
-                if(this.is_admin(msg) || this.is_moderator(msg)){
-                    this.update_guild_setting(guild_id, "room_id", room_id, ()=>{
-                        this.send_message_to_channel(room_id.substring(2),`This is now the place for twitter and reddit updates!`);
-                    });
-                }
-            }
-        });
-
-        this.on_command("set_update_interval", require_admin, msg => {
-            let args = this.get_command_args(msg, 1);
-            let guild_id = this.get_guild(msg);
-            if(args !== null){
-                let update_interval = args;
-                if(this.is_admin(msg)){
-                    this.update_guild_setting(guild_id, "update_interval", update_interval, ()=>{
-                        msg.reply(`The update interval is now ${update_interval}`);
-                    });
-                }
-            }
-        });
-
-        this.on_command("follow_reddit_account", require_moderator, msg => {
-            let args = this.get_command_args(msg, 3);
-            let guild_id = this.get_guild(msg);
-            if(args !== null){
-                let follow_object = `{"username":"${args[0]}","alias":"${args[1]}","message":"${args[2]}","last_post":""}`;
-                if (this.guild_settings.get(guild_id).follow_reddit == null){
-                    this.update_guild_setting(guild_id, "follow_reddit", "["+follow_object+ "]", (guild_id)=>{
-                        this.refresh_guild_settings(guild_id);
-                    });
-                } else {
-                    let follow_reddit = this.guild_settings.get(guild_id).follow_reddit;
-                    for(let user of follow_reddit){
-                        if(args[0] === user.username){
-                            msg.reply(`This server is already following "${args[0]}"`);
-                            return;
-                        } 
-                    }
-                    msg.reply(`This server is now following "${args[0]}"`);
-                    this.guild_settings.get(guild_id).follow_reddit.push(JSON.parse(follow_object));
-                    this.update_guild_setting(guild_id, "follow_reddit", JSON.stringify(follow_reddit));
-                }
-            }
-        });
-
-        this.on_command("unfollow_reddit_account", require_moderator, msg => {
-            let args = this.get_command_args(msg, 1);
-            let guild_id = this.get_guild(msg);
-            if(args !== null){
-                let follow_reddit = this.guild_settings.get(guild_id).follow_reddit;
-                for(let user in follow_reddit){
-                    if(args[0] === follow_reddit[user].username){
-                        follow_reddit.splic(user, 1);
-                        this.update_guild_setting(guild_id, "follow_reddit", JSON.stringify(follow_reddit), (guild_id) => {
-                            this.guild_settings.get(guild_id).follow_reddit = follow_reddit;
-                        });
-                        return;
-                    }
-                }
-            }
-        });
-
-        this.on_command("follow_twitter_account", require_moderator, msg => {
-            let args = this.get_command_args(msg, 3);
-            let guild_id = this.get_guild(msg);
-            if(args !== null){
-                let follow_object = `{"username":"${args[0]}","alias":"${args[1]}","message":"${args[2]}","last_tweet":""}`;
-                if (this.guild_settings.get(guild_id).follow_twitter == null){
-                    this.update_guild_setting(guild_id, "follow_twitter", "["+follow_object+ "]", (guild_id)=>{
-                        this.refresh_guild_settings(guild_id);
-                    });
-                } else {
-                    let follow_twitter = this.guild_settings.get(guild_id).follow_twitter;
-                    for(let user of follow_twitter){
-                        if(args[0] === user.username){
-                            msg.reply(`This server is already following "${args[0]}"`);
-                            return;
-                        } 
-                    }
-                    msg.reply(`This server is now following "${args[0]}"`);
-                    this.guild_settings.get(guild_id).follow_twitter.push(JSON.parse(follow_object));
-                    this.update_guild_setting(guild_id, "follow_twitter", JSON.stringify(follow_twitter));
-                }
-            }
-        });
-
-        this.on_command("unfollow_twitter_account", require_moderator, msg => {
-            let args = this.get_command_args(msg, 1);
-            let guild_id = this.get_guild(msg);
-            if(args !== null){
-                let follow_twitter = this.guild_settings.get(guild_id).follow_twitter;
-                for(let user in follow_twitter){
-                    if(args === follow_twitter[user].username){
-                        follow_twitter.splice(user, 1);
-                        this.update_guild_setting(guild_id, "follow_twitter", JSON.stringify(follow_twitter), (guild_id) => {
-                            this.guild_settings.get(guild_id).follow_twitter = follow_twitter;
-                        });
-                        return;
-                    }
-                }
-                msg.reply(`This server was not following "${args}"!`);
-            }
-        });
-
-        this.on_command("ping", require_all, msg => {
-            msg.reply("pong");
         });
     }
 
@@ -258,6 +116,34 @@ class Bot {
         this.client.login(discord_client_string);
     }
 
+    add_follow_client(client_name, client, get_latest_post) {
+        if(this.follow_clients.has(client_name)){
+            this.error(`The follow client ${client_name} is already registered by the bot!`, true);
+        } else {
+            this.follow_clients.set(client_name, client);
+            this.get_latest_post.set(client_name, get_latest_post);
+        }
+    }
+
+    update_latest_post(guild_id, link, account, latest_post){
+        let following = this.guild_settings.get(guild_id).following;
+        for (let follower of following){
+            if(follower.username == account.username){
+                follower.last_post = latest_post;
+                break;
+            }
+        }
+        this.update_guild_setting(guild_id, "following", following, JSON.stringify(following), guild_id => {
+            let message = account.custom_message;
+            message = message = message.split('_').join(' ');
+            message = message.replace('$alias', account.alias);
+            message = message.replace('$post', `${link+latest_post}`);
+            
+            let room_id = this.guild_settings.get(guild_id).room_id;
+            this.send_message_to_channel(room_id, message);
+            this.info(`New post from ${account.alias} why the fuck are you here!`);
+        });
+    }
 
     // Database operations
     add_server(guild_id, admin_id, prefix, seperator, callback){
@@ -277,8 +163,7 @@ class Bot {
                         "seperator": seperator,
                         "room_id": '',
                         "update_interval": 0,
-                        "follow_reddit": [],
-                        "follow_twitter": []
+                        "following": [],
                     });
                     if(callback instanceof Function){
                         callback(guild_id);
@@ -287,9 +172,9 @@ class Bot {
             });
     }
 
-    update_guild_setting(guild_id, field, value, callback) {
+    update_guild_setting(guild_id, field, value, value_string,callback) {
         let query = `
-            UPDATE GUILDS SET ${field} = '${value}'
+            UPDATE GUILDS SET ${field} = '${value_string}'
             WHERE GUILD_ID = '${guild_id}';
         `
         this.db.get(query, (err) => {
@@ -381,83 +266,22 @@ class Bot {
         message: ''
     }
     */
-    // External data getters
-    async get_latest_tweet(guild_id, account){
-        var params = {screen_name: account.username, count: 1};
-        this.twitter.get('statuses/user_timeline', params, (error, tweets) =>{
-            if (!error) {
-                let latest_tweet = tweets[0].id_str;
-                if(latest_tweet !== account.last_tweet){
-                    let accounts = this.guild_settings.get(guild_id).follow_twitter;
-                    for(let i in accounts){
-                        if(accounts[i].username == account.username){
-                            accounts[i].last_tweet = latest_tweet;
-                            break;
-                        }
-                    }
-                    this.update_guild_setting(guild_id, "follow_twitter", JSON.stringify(accounts), (guild_id)=>{
-                        let message = account.message;
-                        message = message.split('_').join(' ');
-                        message = message.replace('$alias', account.alias);
-                        message = message.replace('$post', `${`https://twitter.com/${account.username}/status/${latest_tweet}`}`);
-                        let room_id = this.guild_settings.get(guild_id).room_id;
-                        this.send_message_to_channel(room_id, message);
-                        this.info(`New post from ${account.alias} why the fuck are you here!`);
-                        this.guild_settings.get(guild_id).follow_twitter = accounts;
-                    });
-                } else {
-                    this.info(`No new posts from ${account.alias} :C`);
-                }
-            } else {
-                this.error(error.message);
-            }
-        });
-    }
-
-    async get_latest_post(guild_id, account){
-        const res = await this.reddit.get(`/user/${account.username}/submitted`, {});
-        let latest_post = res.data.children[0].data.permalink;
-        if (latest_post !== account.last_post){
-            let accounts = this.guild_settings.get(guild_id).follow_reddit;
-            for (let i in accounts){
-                if(accounts[i].username == account.username){
-                    accounts[i].last_post = latest_post;
-                    break;
-                }
-            }
-            this.update_guild_setting(guild_id, "follow_reddit", JSON.stringify(accounts), (guild_id)=>{
-                let message = account.message;
-                message = message = message.split('_').join(' ');
-                message = message.replace('$alias', account.alias);
-                message = message.replace('$post', `${"https://reddit.com/"+latest_post}`);
-                
-                let room_id = this.guild_settings.get(guild_id).room_id;
-                this.send_message_to_channel(room_id, message);
-                this.info(`New post from ${account.alias} why the fuck are you here!`);
-                this.guild_settings.get(guild_id).follow_reddit = accounts;
-            });
-        } else {
-            this.info(`No new posts from ${account.alias} :C`);
-        }
-    }
 
     // Data getter loop
-    async loop_getters(guild_id){
-        let reddit = this.guild_settings.get(guild_id).follow_reddit;
-        let twitter = this.guild_settings.get(guild_id).follow_twitter;
+    async loop_getters(guild_id, interval){
+        let following = this.guild_settings.get(guild_id).following;
         let room_id = this.guild_settings.get(guild_id).room_id;
-        let update_interval = this.guild_settings.get(guild_id).update_interval || 60000;
+        let update_interval;
+        if(interval){
+            update_interval = interval;
+        } else {
+            update_interval = this.guild_settings.get(guild_id).update_interval || 60000;
+        }
         setTimeout(async () => {
-            if(room_id  !== undefined && room_id !== null){
-                if(reddit !== undefined && reddit !== null){
-                    for(let account of reddit){
-                        this.get_latest_post(guild_id, account);
-                    }
-                }
-                if(twitter !== undefined && twitter !== null){
-                    for(let account of twitter){
-                        this.get_latest_tweet(guild_id, account);
-                    }
+            if(following  !== undefined && room_id !== null){
+                for(let follower of following){
+                    let get_latest_post = this.get_latest_post.get(follower.client);
+                    get_latest_post(guild_id, follower);
                 }
             }
             this.loop_getters(guild_id);
@@ -571,14 +395,17 @@ class Bot {
         return this.id_modifier + msg.channel.guild.id;
     }
 
-    error(err) {
-        console.log("[error]",err);
+    error(err, exit) {
+        if(exit) {
+            console.error(err);
+        } else{
+            console.log("[error]",err);
+        }
     }
 
     info(msg) {
         console.log("[info]", msg);
     }
 }
-let config = fs.readFileSync("./config.json");
-config = JSON.parse(config.toString());
-bot = new Bot("./bot.db", config.discord, config.reddit, config.twitter);
+
+module.exports = {Bot, require_admin, require_moderator, require_all};
