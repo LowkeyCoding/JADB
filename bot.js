@@ -40,10 +40,6 @@ class Bot {
             - username STRING (The username of the user)
             - alias STRING (The alias of the user)
             - last_post STRING (the last post of the user)
-    
-    FOLLOW TABLE
-    - GUILD_ID STRING (Uses the guild id as TL key)
-        -FOLLOWING STRING (A json string of all users followed by a guild)
     */
     
     setup_database() {
@@ -237,25 +233,6 @@ class Bot {
         });
     }
 
-    refresh_guild_settings(guild_id, callback) {
-        this.get_guild_settings(guild_id, (guild_id, settings)=>{
-            this.info(`Refreshing ${guild_id}'s settings`)
-            this.guild_settings.set(settings["GUILD_ID"], {
-                "admin": settings["ADMIN"],
-                "moderators": settings["MODERATORS"] === undefined ? settings["MODERATORS"] : "",
-                "prefix": settings["PREFIX"],
-                "seperator": settings["SEPERATOR"],
-                "room_id": settings["ROOM_ID"].substring(2),
-                "update_interval": settings["UPDATE_INTERVAL"],
-                "follow_reddit": JSON.parse(settings["FOLLOW_REDDIT"]),
-                "follow_twitter": JSON.parse(settings["FOLLOW_TWITTER"])
-            });
-            if(callback instanceof Function){
-                callback(guild_id);
-            }
-        });
-    }
-
     /*
     $alias replace with user alias
     $post replace with post link 
@@ -335,10 +312,6 @@ class Bot {
         let guild_id = this.get_guild(msg);
         let args = msg.content.split(this.guild_settings.get(guild_id).seperator);
         return args[0].substring(1);
-    }
-    
-    get_admin(guild_id) {
-        return this.guild_settings.get(guild_id).admin;
     }
     
     execute_command(msg){
