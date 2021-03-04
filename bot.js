@@ -275,11 +275,8 @@ class Bot {
         }
     }
 
-    /* Command handlers
-        0: all
-        1: mods and admin
-        2: admin
-    */
+    /* Change format to $prefix$command($arg$seperator$arg...$seperator$arg)*/
+    /* Default !$command($arg,$arg,...,$arg)*/
     on_command(command, privilege_level, handler) {
         if(!this.commands.has(command)){
             this.commands.set(command, {"level": privilege_level, "handler": handler});
@@ -324,7 +321,7 @@ class Bot {
                 if(this.is_admin(msg) || this.is_moderator(msg)){
                     command.handler(msg);
                 } else {
-                    msg.reply(`You need to be an administrator or moderator to execute ${command}!`)
+                    msg.reply(`You need to be an administrator or moderator to execute ${command_name}!`)
                 }
             } else if(command.level === require_admin){
                 if(this.is_admin(msg)){
