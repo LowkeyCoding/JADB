@@ -60,7 +60,9 @@ bot.on_command("add_moderator", Bot.require_admin, msg => {
         if(bot.is_admin(msg)){
             let mods = bot.guild_settings.get(guild_id).moderators;
             mods.push(moderator);
-            bot.update_guild_setting(guild_id, "moderators", mods, JSON.stringify(mods));
+            bot.update_guild_setting(guild_id, "moderators", mods, JSON.stringify(mods), guild_id =>{
+                msg.reply(`${moderator} is now a moderator on this server!`);
+            });
         }
     }
 });
