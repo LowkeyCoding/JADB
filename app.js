@@ -45,8 +45,11 @@ bot.on_command("handover_admin", Bot.require_admin, msg => {
     let args = bot.get_command_args(msg, 1);
     let guild_id = bot.get_guild(msg)
     if(args !== null){
+        let admin_id = bot.id_modifier+args;
         if(bot.is_admin(msg)){
-            bot.update_guild_setting(guild_id, "admin", admin_id, admin_id);
+            bot.update_guild_setting(guild_id, "admin", admin_id.substr(2), admin_id, guild_id => {
+                msg.reply(`The administrator is now ${admin_id}`);
+            });
         }
     }
 });
