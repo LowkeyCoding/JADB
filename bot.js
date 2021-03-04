@@ -255,7 +255,7 @@ class Bot {
             update_interval = this.guild_settings.get(guild_id).update_interval || 60000;
         }
         setTimeout(async () => {
-            if(following  instanceof Array && room_id instanceof String){
+            if(following  !== Object && room_id !== String){
                 for(let follower of following){
                     let get_latest_post = this.get_latest_post.get(follower.client);
                     get_latest_post(guild_id, follower);
