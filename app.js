@@ -101,14 +101,16 @@ bot.on_command("follow", Bot.require_moderator, msg => {
         let [client, username, alias, custom_message] = args;
         if(bot.follow_clients.has(client)){
             let following = bot.guild_settings.get(guild_id).following;
-            for(user of following){
-                if(user.client === client && user.username === username){
-                    user.alias = alias;
-                    user.custom_message = custom_message;
-                    bot.update_guild_setting(guild_id, "following", following, JSON.stringify(following), guild_id =>{
-                        msg.reply(`Server updated alias and custom_message of ${username}`);
-                    });
-                    return;
+            if(following instanceof Array){
+                for(user of following){
+                    if(user.client === client && user.username === username){
+                        user.alias = alias;
+                        user.custom_message = custom_message;
+                        bot.update_guild_setting(guild_id, "following", following, JSON.stringify(following), guild_id =>{
+                            msg.reply(`Server updated alias and custom_message of ${username}`);
+                        });
+                        return;
+                    }
                 }
             }
             following.push({

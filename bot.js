@@ -64,12 +64,12 @@ class Bot {
         this.get_all_guild_settings((guild)=>{
             this.guild_settings.set(guild["GUILD_ID"], {
                 "admin": guild["ADMIN"].substr(2),
-                "moderators": JSON.parse(guild["MODERATORS"]),
+                "moderators": guild["MODERATORS"] === null ? [] : JSON.parse(guild["MODERATORS"]),
                 "prefix": guild["PREFIX"],
                 "seperator": guild["SEPERATOR"],
                 "room_id": guild["ROOM_ID"] === null ? guild["ROOM_ID"] : guild["ROOM_ID"].substr(2),
                 "update_interval": guild["UPDATE_INTERVAL"],
-                "following": JSON.parse(guild["FOLLOWING"]),
+                "following": guild["FOLLOWING"] === null ? [] : JSON.parse(guild["FOLLOWING"]),
             });
             this.loop_getters(guild["GUILD_ID"], 6000);
             this.info(`Launched bot for ${guild["GUILD_ID"]}`);
@@ -255,7 +255,7 @@ class Bot {
             update_interval = this.guild_settings.get(guild_id).update_interval || 60000;
         }
         setTimeout(async () => {
-            if(following  !== undefined && room_id !== null){
+            if(following  instanceof Array && room_id instanceof String){
                 for(let follower of following){
                     let get_latest_post = this.get_latest_post.get(follower.client);
                     get_latest_post(guild_id, follower);
@@ -318,7 +318,7 @@ class Bot {
             if(command.level === require_all){
                 command.handler(msg);
             } else if(command.level === require_moderator){
-                if(this.is_admin(msg) || this.is_moderator(msg)){
+                if(this.is_moderator(msg) || this.is_admin(msg)){
                     command.handler(msg);
                 } else {
                     msg.reply(`You need to be an administrator or moderator to execute ${command_name}!`)
@@ -341,9 +341,14 @@ class Bot {
 
     // Helper functions
     is_moderator(msg){
-        for(moderator of this.guild_settings.get(this.get_guild(msg)).moderators){
-            if(moderator === this.get_sender(msg)){
-                return true;
+        let moderators = this.guild_settings.get(this.get_guild(msg)).moderators;
+        if(moderators instanceof Array){
+            if(moderators.length >= 1){
+                for(let moderator of moderators){
+                    if(moderator === this.get_sender(msg)){
+                        return true;
+                    }
+                }
             }
         }
         return false;
